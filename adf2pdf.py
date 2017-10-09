@@ -5,6 +5,7 @@
 # 2017, Georg Sauthoff <mail@gms.tf>, GPLv3+
 
 import configargparse
+from distutils.version import LooseVersion
 import glob
 import logging
 import os
@@ -49,6 +50,8 @@ performance - even if only the alpha version is available.
       help='scan with colors')
   p.add_argument('--device', '-d', default='fujitsu:ScanSnap S1500:53095',
       help='Scanner device')
+  p.add_argument('--old-tesseract', action='store_true',
+      help='Allow Tesseract version < 4')
   return p
 
 def parse_args(*a):
@@ -168,7 +171,17 @@ def is_empty_img(filename):
   return int(m.group(2)) < 100 or int(m.group(3)) < 100
   #return 'geometry does not contain image' in r.stderr
 
+def check_tesseract(args):
+  o = runo(['tesseract', '--version'])
+  ls = o.stdout.splitlines()
+  _, version = ls[0].split()
+  return LooseVersion(version) < LooseVersion('4') \
+      and not args.old_tesseract
+
 def imain(args):
+  if check_tesseract(args):
+    log.error('Tesseract is too old. Try putting Tesseract 4 into the PATH.')
+    return 1
   log.debug('Changing to workdir: {}'.format(args.work))
   os.makedirs(args.work, exist_ok=True)
   os.chdir(args.work)
