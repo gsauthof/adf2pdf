@@ -4,7 +4,7 @@
 #
 # 2017, Georg Sauthoff <mail@gms.tf>, GPLv3+
 
-import argparse
+import configargparse
 import glob
 import logging
 import os
@@ -16,11 +16,17 @@ import tempfile
 
 
 def mk_arg_parser():
-  p = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description='Do some stuff',
-        epilog='...')
-  p.add_argument('output', metavar='FILENAME', nargs=1,
+  p = configargparse.ArgumentParser(
+      default_config_files=['/etc/adf2pdf.conf', '~/.config/adf2pdf.conf'],
+      formatter_class=configargparse.RawDescriptionHelpFormatter,
+      description='Auto-feed documents into PDFs with a text layer.',
+      epilog='''That means this tool automates the workflow around scanadf
+and tesseract. It's recommended to use Tesseract 4, for better OCR
+performance - even if only the alpha version is available.
+
+2017, Georg Sauthoff <mail@gms.tf>, GPLv3+
+      ''')
+  p.add('output', metavar='FILENAME', nargs=1,
       help='output PDF filename')
   p.add_argument('--lang', '-l', metavar='ISO3',
       default='deu',
