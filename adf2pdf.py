@@ -163,12 +163,13 @@ def is_empty_img(filename):
   # http://www.imagemagick.org/Usage/crop/#trim_blur
   # http://www.imagemagick.org/Usage/compare/ (Blank Fax)
   # '-virtual-pixel', 'edge'
-  r = runo(['convert', filename, '-virtual-pixel', 'White', '-blur', '0x15',
+  r = runo(['convert', filename, '-shave', '300x0',
+    '-virtual-pixel', 'White', '-blur', '0x15',
     '-fuzz', '15%', '-trim', 'info:'])
   m = dim_re.search(r.stdout)
   if not m:
     raise  RuntimeError("Couldn't find dimensions in: {}".format(r.stdout))
-  return int(m.group(2)) < 100 or int(m.group(3)) < 100
+  return int(m.group(2)) < 80 or int(m.group(3)) < 80
   #return 'geometry does not contain image' in r.stderr
 
 def check_tesseract(args):
