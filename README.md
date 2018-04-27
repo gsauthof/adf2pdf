@@ -1,9 +1,9 @@
-This repository contains adf2pdf, a tool that turns paper
+This repository contains **adf2pdf**, a tool that turns paper
 documents into PDFs with a text layer. For that, it calls
 external programs to do the different subtasks: for example,
-[Sane's][5] [scanadf][6] for the scanning, ImageMagick for some
-image processing and [Tesseract][4] for the [optical character
-recognition] (OCR). By default,  it detects empty pages (as they may easily
+[Sane's][5] [scanimage][6] for the scanning, ImageMagick for
+empty page detection and [Tesseract][4] for the [optical character
+recognition] (OCR). By default, it detects empty pages (as they may easily
 occur during duplex scanning) and excludes them from the OCR and
 the resulting PDF.
 
@@ -24,7 +24,7 @@ convenient.
 
 The script assumes Tesseract version 4, by default. Version 3 can
 be used as well, but the [new neural network system in Tesseract
-4][2] just performs magnitudes better than the old OCR model.
+4][8] just performs magnitudes better than the old OCR model.
 As of late 2017, there is no stable version 4, yet, but since
 the alpha version is so much better at OCR I can't recommend it
 enough over the stable version 3.
@@ -43,5 +43,6 @@ Tesseract 4 notes:
 [3]: https://github.com/tesseract-ocr/tesseract/wiki/Data-Files
 [4]: https://en.wikipedia.org/wiki/Tesseract_(software)
 [5]: https://en.wikipedia.org/wiki/Scanner_Access_Now_Easy
-[6]: http://www.martoneconsulting.com/sane-scanadf.html
+[6]: http://www.sane-project.org/man/scanimage.1.html
 [7]: https://en.wikipedia.org/wiki/Optical_character_recognition
+[8]: https://github.com/tesseract-ocr/tesseract/wiki/NeuralNetsInTesseract4.00

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import multiprocessing
 
 
 def mk_arg_parser():
@@ -52,6 +53,8 @@ performance - even if only the alpha version is available.
       help='Scanner device')
   p.add_argument('--old-tesseract', action='store_true',
       help='Allow Tesseract version < 4')
+  p.add_argument('-j', type=int, default=0,
+      help='Number of parallel convert jobs to start (default: cores-1)')
   return p
 
 def parse_args(*a):
@@ -68,6 +71,11 @@ def parse_args(*a):
       args.work = tempfile.mkdtemp(dir=p)
     else:
       args.work = tempfile.mkdtemp()
+  if not args.j:
+    args.j = max(multiprocessing.cpu_count() - 1, 1)
+    log.debug('Starting {} convert jobs at most'.format(args.j))
+  if args.output.endswith('.pdf'):
+    args.output = args.output[:-4]
   return args
 
 # Logging
@@ -113,96 +121,127 @@ def quote_arg(x):
     return "'" + r + "'"
   return x
 
-def run(cmd, *xs, **ys):
+def Popen(cmd, *xs, **ys):
   call = ' '.join(quote_arg(x) for x in cmd)
   log.debug('Calling: ' + call)
-  try:
-    r = subprocess.run(cmd, *xs, **ys)
-  except subprocess.CalledProcessError as e:
-    log.error(('Command exited with: {}\n'
-        'Call: {}\n    Stdout: {}\n    Stderr: {}')
-        .format(e.returncode, call, e.stdout, e.stderr))
-    raise
-  log.debug(('Command exited with: {}\n'
-      'Call: {}\n    Stdout: {}\n    Stderr: {}')
-      .format(r.returncode, call, r.stdout, r.stderr))
-  return r
-
-def runo(cmd, *xs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True, **ys):
-  return run(cmd, *xs, stdout=stdout, stderr=stderr, check=check, universal_newlines=universal_newlines, **ys)
+  return subprocess.Popen(cmd, *xs, universal_newlines=True, **ys)
 
 def scanadf(args):
-  mode = 'Color' if args.color else 'Lineart'
-  runo(['scanadf', '-d', args.device,
+  pat = 'image-%04d'
+  if args.color:
+    mode   = 'Color'
+    format = 'jpeg'
+    pat   += '.jpg'
+  else:
+    mode   = 'Lineart'
+    format = 'png'
+    pat   += '.png'
+  with Popen(['scanimage', '-d', args.device,
       '--page-width=210', '--page-height=297', '--resolution=600',
       '--source=ADF Duplex', '--mode=' + mode,
-      '-v', '-N', '-s1', '-o', 'image-%04d'])
+      '--format=' + format,
+      '--batch={}/{}'.format(args.work, pat),
+      '--batch-print'],
+      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as p:
+    for line in p.stdout:
+      yield line[:-1]
 
-def convert_img(args, filename):
-  ext = '.jpg' if args.color else '.png'
-  output = filename + ext
-  runo(['convert', filename, '-density', '600', '-units', 'pixelsperinch',
-    output])
-  return output
-
-def create_filelist(xs, filename):
-  with open(filename, 'w') as f:
-    for x in xs:
-      print(x, file=f)
-
-def create_pdf(args, images, filenameP):
-  filename = filenameP[:-4] if filenameP.endswith('.pdf') else filenameP
-  create_filelist(images, 'tlist')
-  runo(['tesseract', '--oem', args.oem, '-l', args.lang, 'tlist',
-      filename, 'pdf'])
 
 dim_re = re.compile('(PNG|JPEG) ([0-9]+)x([0-9]+) ')
 
-def is_empty_img(filename):
+def start_is_empty_img(filename, i):
   # doing a noisy trim here - cf.
   # http://www.imagemagick.org/Usage/crop/#trim_blur
   # http://www.imagemagick.org/Usage/compare/ (Blank Fax)
   # '-virtual-pixel', 'edge'
-  r = runo(['convert', filename, '-shave', '300x0',
-    '-virtual-pixel', 'White', '-blur', '0x15',
-    '-fuzz', '15%', '-trim', 'info:'])
-  m = dim_re.search(r.stdout)
+  p = Popen(['convert', filename, '-shave', '300x0',
+      '-virtual-pixel', 'White', '-blur', '0x15',
+      '-fuzz', '15%', '-trim', 'info:'],
+      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+  return p
+
+def is_empty_img(stdout):
+  m = dim_re.search(stdout)
   if not m:
-    raise  RuntimeError("Couldn't find dimensions in: {}".format(r.stdout))
+    raise  RuntimeError("Couldn't find dimensions in: {}".format(stdout))
   return int(m.group(2)) < 80 or int(m.group(3)) < 80
   #return 'geometry does not contain image' in r.stderr
 
 def check_tesseract(args):
-  o = runo(['tesseract', '--version'])
-  ls = o.stdout.splitlines()
+  o = subprocess.check_output(['tesseract', '--version'],
+      universal_newlines=True)
+  ls = o.splitlines()
   _, version = ls[0].split()
   return LooseVersion(version) < LooseVersion('4') \
       and not args.old_tesseract
+
+class PQueue:
+  def __init__(self, j):
+    self._j = j
+    self._running = []
+    self._queued = []
+    self._done = []
+  def start(self, f, *xs, **ys):
+    self._queued.append((f, xs, ys))
+    self._start_more()
+  def _start_more(self):
+    while self._queued and len(self._running) < self._j:
+      f, xs, ys = self._queued.pop(0)
+      self._running.append((f(*xs, **ys), xs, ys))
+  def yield_done(self, timeout=None):
+    while self._done or self._running or self._queued:
+      self._start_more()
+      for p, xs, ys, o, e in self._done:
+        yield (p, xs, ys, o, e)
+      self._done.clear()
+      if self._running:
+        try:
+          p, xs, ys = self._running[0]
+          o, e = p.communicate(timeout=timeout)
+          self._done.append((p, xs, ys, o, e))
+          self._running.pop(0)
+        except subprocess.TimeoutExpired:
+          yield (None, xs, None, None, None)
+
 
 def imain(args):
   if check_tesseract(args):
     log.error('Tesseract is too old. Try putting Tesseract 4 into the PATH.')
     return 1
-  log.debug('Changing to workdir: {}'.format(args.work))
+  log.debug('Making workdir: {}'.format(args.work))
   os.makedirs(args.work, exist_ok=True)
-  os.chdir(args.work)
-  if not args.no_scan:
-    scanadf(args)
-  xs = []
-  for i, filename in enumerate(
-      sorted(glob.glob('image-[0-9][0-9][0-9][0-9]')), 1):
-    x = convert_img(args, filename)
-    if not args.keep_empty and is_empty_img(x):
-      log.warn('Ignoring {}. page because it is empty'.format(i))
+  tesseract = Popen(['tesseract', '--oem', args.oem, '-l', args.lang,
+      '-c', 'stream_filelist=true', '-', args.output, 'pdf'],
+      stdin=subprocess.PIPE,
+      stdout=subprocess.DEVNULL,
+      stderr=subprocess.DEVNULL)
+  pool = PQueue(args.j)
+  def forward_page(p, xs, ys, o, e):
+    if p:
+      if is_empty_img(o):
+        log.warn('Ignoring {}. page because it is empty'.format(xs[1]))
+      else:
+        log.debug('Sending {} to tesseract'.format(xs[0]))
+        tesseract.stdin.write(xs[0] + '\n')
     else:
-      xs.append(x)
-  if not xs:
-    raise RuntimeError('No images to convert ...')
-  create_pdf(args, xs, args.output)
+      log.debug('Still waiting on is_empty process for {}'.format(xs[0]))
+      return False
+    return True
+  for i, filename in enumerate(scanadf(args), 1):
+    log.debug('{} successfully scanned'.format(filename))
+    pool.start(start_is_empty_img, filename, i)
+    for p, xs, ys, o, e in pool.yield_done(timeout=0):
+      if not forward_page(p, xs, ys, o, e):
+        break
+  for p, xs, ys, o, e in pool.yield_done():
+    forward_page(p, xs, ys, o, e)
+  log.debug('Closing tesseract stdin')
+  tesseract.stdin.close()
+  log.debug('Waiting on tesseract')
+  tesseract.wait()
   if not args.keep_work:
     log.debug('Removing workdir: {}'.format(args.work))
     shutil.rmtree(args.work)
-
   return 0
 
 def main(*a):
