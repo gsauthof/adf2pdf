@@ -5,6 +5,7 @@
 # 2017, Georg Sauthoff <mail@gms.tf>, GPLv3+
 
 import configargparse
+import contextlib
 from distutils.version import LooseVersion
 import glob
 import logging
@@ -32,30 +33,52 @@ performance - even if only the alpha version is available.
       help='output PDF filename')
   p.add_argument('--lang', '-l', metavar='ISO3',
       default='deu',
-      help='language for OCR (default: deu)')
+      help='Language for OCR (default: deu)')
   p.add_argument('--work', metavar='DIRECTORY',
-      help='work directory')
+      help='Work directory (default: automatically created under --temp value)')
+  p.add_argument('--temp', metavar='DIRECTORY', default='/var/tmp',
+      help='Temporary base directory (default: /var/tmp). Used unless --work is specified.')
   p.add_argument('--log', metavar='FILENAME', const='debug.log', nargs='?',
-      help='also write log messages into a file')
+      help='Also write log messages into a file')
   p.add_argument('--keep-empty', action='store_true',
-      help='keep empty pages')
+      help='Keep empty pages (i.e. disable empty page detection).')
   p.add_argument('--keep-work', action='store_true',
-      help='keep the work directory')
+      help='Keep the work directory')
   p.add_argument('--debug', '-v', action='store_true',
-      help='print debug messages to the console')
+      help='Print debug messages to the console')
   p.add_argument('--oem', default='1',
-      help='tesseract model (0=legacy, 1=neural) (default: 1)')
+      help='Tesseract model (0=legacy, 1=neural) (default: 1)')
   p.add_argument('--no-scan', action='store_true',
-      help='assume that work directory already contains the image files')
+      help='Assume that work directory already contains the image files')
   p.add_argument('--color', action='store_true',
-      help='scan with colors')
+      help='Scan with colors')
   p.add_argument('--device', '-d', default='fujitsu:ScanSnap S1500:53095',
       help='Scanner device')
   p.add_argument('--old-tesseract', action='store_true',
       help='Allow Tesseract version < 4')
-  p.add_argument('-j', type=int, default=0,
+  p.add_argument('-j', type=int,
       help='Number of parallel convert jobs to start (default: cores-1)')
+  p.add_argument('--exclude', '-x', default='',
+      help='Comma-separated list of pages to ignore')
+  p.add_argument('--duplex', action='store_true', default=True,
+      help='Scan front and back at once (default: true)')
+  p.add_argument('--simplex', dest='duplex', action='store_false',
+      help='Disable duplex scanning')
   return p
+
+@contextlib.contextmanager
+def Temporary_Directory(name=None, suffix=None, prefix=None, dir=None, delete=True):
+  if name:
+    os.makedirs(name, exist_ok=True)
+    dirname = name
+  else:
+    dirname = tempfile.mkdtemp(suffix, prefix, dir)
+  try:
+    yield dirname
+  finally:
+    if delete:
+      log.debug('Removing temporary directory: {}'.format(dirname))
+      shutil.rmtree(dirname)
 
 def parse_args(*a):
   arg_parser = mk_arg_parser()
@@ -65,17 +88,15 @@ def parse_args(*a):
   if not args.debug:
     logging.getLogger().handlers[0].setLevel(logging.WARNING)
   args.output = os.path.abspath(args.output[0])
-  if not args.work:
-    p = '/var/tmp'
-    if os.path.exists(p):
-      args.work = tempfile.mkdtemp(dir=p)
-    else:
-      args.work = tempfile.mkdtemp()
   if not args.j:
     args.j = max(multiprocessing.cpu_count() - 1, 1)
     log.debug('Starting {} convert jobs at most'.format(args.j))
   if args.output.endswith('.pdf'):
     args.output = args.output[:-4]
+  if args.exclude:
+    args.exclude = set(int(x) for x in args.exclude.split(','))
+  else:
+    args.exclude = set()
   return args
 
 # Logging
@@ -136,9 +157,11 @@ def scanadf(args):
     mode   = 'Lineart'
     format = 'png'
     pat   += '.png'
+  duplex = [ '--source=ADF Duplex' ] if args.duplex else []
   with Popen(['scanimage', '-d', args.device,
-      '--page-width=210', '--page-height=297', '--resolution=600',
-      '--source=ADF Duplex', '--mode=' + mode,
+      '--page-width=210', '--page-height=297', '--resolution=600'
+      ] + duplex + [
+      '--mode=' + mode,
       '--format=' + format,
       '--batch={}/{}'.format(args.work, pat),
       '--batch-print'],
@@ -179,15 +202,19 @@ class PQueue:
   def __init__(self, j):
     self._j = j
     self._running = []
+    self._running_cnt = 0
     self._queued = []
     self._done = []
   def start(self, f, *xs, **ys):
     self._queued.append((f, xs, ys))
     self._start_more()
   def _start_more(self):
-    while self._queued and len(self._running) < self._j:
+    while self._queued and self._running_cnt < self._j:
       f, xs, ys = self._queued.pop(0)
-      self._running.append((f(*xs, **ys), xs, ys))
+      p = f(*xs, **ys)
+      self._running.append((p, xs, ys))
+      if type(p) is subprocess.Popen:
+        self._running_cnt += 1
   def yield_done(self, timeout=None):
     while self._done or self._running or self._queued:
       self._start_more()
@@ -197,7 +224,10 @@ class PQueue:
       if self._running:
         try:
           p, xs, ys = self._running[0]
-          o, e = p.communicate(timeout=timeout)
+          if type(p) is subprocess.Popen:
+            o, e = p.communicate(timeout=timeout)
+          else:
+            o, e = p
           self._done.append((p, xs, ys, o, e))
           self._running.pop(0)
         except subprocess.TimeoutExpired:
@@ -208,8 +238,11 @@ def imain(args):
   if check_tesseract(args):
     log.error('Tesseract is too old. Try putting Tesseract 4 into the PATH.')
     return 1
-  log.debug('Making workdir: {}'.format(args.work))
-  os.makedirs(args.work, exist_ok=True)
+  with Temporary_Directory(name=args.work,
+      dir=args.temp, delete=args.keep_work) as args.work:
+    return imain_rest(args)
+
+def imain_rest(args):
   tesseract = Popen(['tesseract', '--oem', args.oem, '-l', args.lang,
       '-c', 'stream_filelist=true', '-', args.output, 'pdf'],
       stdin=subprocess.PIPE,
@@ -218,7 +251,9 @@ def imain(args):
   pool = PQueue(args.j)
   def forward_page(p, xs, ys, o, e):
     if p:
-      if is_empty_img(o):
+      if xs[1] in args.exclude:
+        log.debug('Ignoring {}. page because it is excluded'.format(xs[1]))
+      elif is_empty_img(o):
         log.warn('Ignoring {}. page because it is empty'.format(xs[1]))
       else:
         log.debug('Sending {} to tesseract'.format(xs[0]))
@@ -229,7 +264,10 @@ def imain(args):
     return True
   for i, filename in enumerate(scanadf(args), 1):
     log.debug('{} successfully scanned'.format(filename))
-    pool.start(start_is_empty_img, filename, i)
+    if args.keep_empty or i in args.exclude:
+      pool.start(lambda x,y: ('PNG 2323x2323 ', None), filename, i)
+    else:
+      pool.start(start_is_empty_img, filename, i)
     for p, xs, ys, o, e in pool.yield_done(timeout=0):
       if not forward_page(p, xs, ys, o, e):
         break
@@ -239,9 +277,6 @@ def imain(args):
   tesseract.stdin.close()
   log.debug('Waiting on tesseract')
   tesseract.wait()
-  if not args.keep_work:
-    log.debug('Removing workdir: {}'.format(args.work))
-    shutil.rmtree(args.work)
   return 0
 
 def main(*a):
