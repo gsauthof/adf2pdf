@@ -35,7 +35,7 @@ performance - even if only the alpha version is available.
       default='deu',
       help='Language for OCR (default: deu)')
   p.add_argument('--work', metavar='DIRECTORY',
-      help='Work directory (default: automatically created under --temp value)')
+      help='Work directory (default: automatically created under --temp value). The complete work directory is deleted unless --keep-work is specified.')
   p.add_argument('--temp', metavar='DIRECTORY', default='/var/tmp',
       help='Temporary base directory (default: /var/tmp). Used unless --work is specified.')
   p.add_argument('--log', metavar='FILENAME', const='debug.log', nargs='?',
@@ -157,6 +157,13 @@ def scanadf(args):
     mode   = 'Lineart'
     format = 'png'
     pat   += '.png'
+
+  if args.no_scan:
+    t = '{}/*{}'.format(args.work, pat.replace('%04d', '*'))
+    log.debug('globbing for: {}'.format(t))
+    yield from glob.glob(t)
+    return
+
   duplex = [ '--source=ADF Duplex' ] if args.duplex else []
   with Popen(['scanimage', '-d', args.device,
       '--page-width=210', '--page-height=297', '--resolution=600'
@@ -230,6 +237,7 @@ class PQueue:
             o, e = p
           self._done.append((p, xs, ys, o, e))
           self._running.pop(0)
+          self._running_cnt -= 1
         except subprocess.TimeoutExpired:
           yield (None, xs, None, None, None)
 
@@ -239,7 +247,8 @@ def imain(args):
     log.error('Tesseract is too old. Try putting Tesseract 4 into the PATH.')
     return 1
   with Temporary_Directory(name=args.work,
-      dir=args.temp, delete=args.keep_work) as args.work:
+      dir=args.temp, delete=(not args.keep_work)) as args.work:
+    log.debug('Working under: {}'.format(args.work))
     return imain_rest(args)
 
 def imain_rest(args):
