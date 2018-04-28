@@ -8,14 +8,17 @@ import configargparse
 import contextlib
 from distutils.version import LooseVersion
 import glob
+import img2pdf # 0.2.4 works fine
 import logging
+import multiprocessing
 import os
+import PIL
+import PyPDF2
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import multiprocessing
 
 
 def mk_arg_parser():
@@ -64,6 +67,8 @@ performance - even if only the alpha version is available.
       help='Scan front and back at once (default: true)')
   p.add_argument('--simplex', dest='duplex', action='store_false',
       help='Disable duplex scanning')
+  p.add_argument('--jp2', action='store_true',
+      help='Use the JPEG 2000 format instead of just JPEG when scanning in color (cf. --color)')
   return p
 
 @contextlib.contextmanager
@@ -83,16 +88,14 @@ def Temporary_Directory(name=None, suffix=None, prefix=None, dir=None, delete=Tr
 def parse_args(*a):
   arg_parser = mk_arg_parser()
   args = arg_parser.parse_args(*a)
+  args.output = args.output[0]
   if args.log:
     setup_file_logging(args.log)
   if not args.debug:
     logging.getLogger().handlers[0].setLevel(logging.WARNING)
-  args.output = os.path.abspath(args.output[0])
   if not args.j:
     args.j = max(multiprocessing.cpu_count() - 1, 1)
     log.debug('Starting {} convert jobs at most'.format(args.j))
-  if args.output.endswith('.pdf'):
-    args.output = args.output[:-4]
   if args.exclude:
     args.exclude = set(int(x) for x in args.exclude.split(','))
   else:
@@ -148,15 +151,13 @@ def Popen(cmd, *xs, **ys):
   return subprocess.Popen(cmd, *xs, universal_newlines=True, **ys)
 
 def scanadf(args):
-  pat = 'image-%04d'
+  pat = 'image-%04d.png'
   if args.color:
     mode   = 'Color'
     format = 'jpeg'
-    pat   += '.jpg'
   else:
     mode   = 'Lineart'
     format = 'png'
-    pat   += '.png'
 
   if args.no_scan:
     t = '{}/*{}'.format(args.work, pat.replace('%04d', '*'))
@@ -241,6 +242,55 @@ class PQueue:
         except subprocess.TimeoutExpired:
           yield (None, xs, None, None, None)
 
+# One thing to keep in mind:
+# scanimage supports directly writing jpg and tesseract supports doing
+# OCR on jpg, but the lossy compression of jpg can only decrease
+# the efficiency of the OCR. Thus, tesseract must always
+# get its input lossless for optimal OCR results while colored
+# images must be JPG compressed before going into the resulting PDF
+# to save space.
+def png2jpg(filename, ofilename):
+  log.debug('Converting {} to {}'.format(filename, ofilename))
+  with PIL.Image.open(filename) as png:
+    img = png.convert('RGB')
+    img.save(ofilename)
+  return ofilename
+
+# img2pdf performs better than ImageMagick and Tesseract, i.e. the
+# resulting PDF is much smaller for lineart PNG images and
+# not bigger than the input for JPEG images. With 0.2.4 PNG
+# images are losslessly re-encoded into CCITT, while the JPEGs
+# are included as-is. Both ImageMagick and Tesseract don't
+# use CCITT for the lineart PNGs and at least ImageMagick unnecessarily
+# re-encodes the JPEGs, thus yielding larger and lower quality images.
+# With lineart PNGs, the Tesseract image PDF is 1.5 times or so as big,
+# while the ImageMagick PDF is 2 times or so as big.
+# The img2pdf master branch contains some work for including PNGs as-is,
+# as well - although, for this use-case CCITT seems to be better suited
+# than the PNGs created by scanimage. (cf. pdfimages -list)
+def create_img_pdf(imgs, args):
+  filename = args.work + '/image-only.pdf'
+  log.debug('Writing images to pdf: {}'.format(filename))
+  if args.color:
+    jpg = 'jp2' if args.jp2 else 'jpg'
+    ts = []
+    for img in imgs:
+      ts.append(png2jpg(img, img[:-3] + jpg))
+    imgs = ts
+  with open(filename, 'wb') as f:
+    img2pdf.convert(imgs, outputstream=f)
+
+# cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273629726
+def merge_pdfs(filename1, filename2, ofilename):
+  log.debug('Merging {} and {} into {}'.format(filename1, filename2, ofilename))
+  with open(filename1, 'rb') as f1, open(filename2, 'rb') as f2:
+    pdf1, pdf2 = (PyPDF2.PdfFileReader(x) for x in (f1, f2))
+    opdf = PyPDF2.PdfFileWriter()
+    for page1, page2 in zip(pdf1.pages, pdf2.pages):
+      page1.mergePage(page2)
+      opdf.addPage(page1)
+    with open(ofilename, 'wb') as g:
+      opdf.write(g)
 
 def imain(args):
   if check_tesseract(args):
@@ -251,13 +301,17 @@ def imain(args):
     log.debug('Working under: {}'.format(args.work))
     return imain_rest(args)
 
+
 def imain_rest(args):
   tesseract = Popen(['tesseract', '--oem', args.oem, '-l', args.lang,
-      '-c', 'stream_filelist=true', '-', args.output, 'pdf'],
+      '-c', 'stream_filelist=true',
+      '-c', 'textonly_pdf=1',
+      '-', args.work + '/text-only', 'pdf'],
       stdin=subprocess.PIPE,
       stdout=subprocess.DEVNULL,
       stderr=subprocess.DEVNULL)
   pool = PQueue(args.j)
+  imgs = []
   def forward_page(p, xs, ys, o, e):
     if p:
       if xs[1] in args.exclude:
@@ -266,6 +320,7 @@ def imain_rest(args):
         log.warn('Ignoring {}. page because it is empty'.format(xs[1]))
       else:
         log.debug('Sending {} to tesseract'.format(xs[0]))
+        imgs.append(xs[0])
         tesseract.stdin.write(xs[0] + '\n')
     else:
       log.debug('Still waiting on is_empty process for {}'.format(xs[0]))
@@ -277,15 +332,20 @@ def imain_rest(args):
       pool.start(lambda x,y: ('PNG 2323x2323 ', None), filename, i)
     else:
       pool.start(start_is_empty_img, filename, i)
-    for p, xs, ys, o, e in pool.yield_done(timeout=0):
+    for p, xs, ys, o, e in pool.yield_done(timeout=0.1):
       if not forward_page(p, xs, ys, o, e):
         break
   for p, xs, ys, o, e in pool.yield_done():
     forward_page(p, xs, ys, o, e)
   log.debug('Closing tesseract stdin')
   tesseract.stdin.close()
+  create_img_pdf(imgs, args)
   log.debug('Waiting on tesseract')
   tesseract.wait()
+  # merge images on top of text or the other way around
+  # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273389307
+  merge_pdfs(args.work + '/text-only.pdf',  args.work + '/image-only.pdf',
+      args.output)
   return 0
 
 def main(*a):
