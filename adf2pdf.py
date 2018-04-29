@@ -71,6 +71,8 @@ performance - even if only the alpha version is available.
       help='Disable duplex scanning')
   p.add_argument('--jp2', action='store_true',
       help='Use the JPEG 2000 format instead of just JPEG when scanning in color (cf. --color)')
+  p.add_argument('--png', action='store_true',
+      help="When using --color, don't compress the images into JPEG before including them in the PDF (not recommended)")
   return p
 
 @contextlib.contextmanager
@@ -153,13 +155,9 @@ def Popen(cmd, *xs, **ys):
   return subprocess.Popen(cmd, *xs, universal_newlines=True, **ys)
 
 def scanadf(args):
-  pat = 'image-%04d.png'
-  if args.color:
-    mode   = 'Color'
-    format = 'jpeg'
-  else:
-    mode   = 'Lineart'
-    format = 'png'
+  format = 'png'
+  pat    = 'image-%04d.png'
+  mode   = 'Color' if args.color else 'Lineart'
 
   if args.no_scan:
     t = '{}/*{}'.format(args.work, pat.replace('%04d', '*'))
@@ -273,13 +271,14 @@ def png2jpg(filename, ofilename):
 def create_img_pdf(imgs, args):
   filename = args.work + '/image-only.pdf'
   log.debug('Writing images to pdf: {}'.format(filename))
-  if args.color:
+  if args.color and not args.png:
     jpg = 'jp2' if args.jp2 else 'jpg'
     ts = []
     for img in imgs:
       ts.append(png2jpg(img, img[:-3] + jpg))
     imgs = ts
   with open(filename, 'wb') as f:
+    log.debug('Images: {}'.format(imgs))
     img2pdf.convert(imgs, outputstream=f)
 
 # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273629726
