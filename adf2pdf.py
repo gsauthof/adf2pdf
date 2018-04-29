@@ -12,9 +12,10 @@ from distutils.version import LooseVersion
 import glob
 import img2pdf # 0.2.4 works fine
 import logging
-import multiprocessing
 import os
-import PIL
+import PIL.Image
+import PIL.ImageFilter
+import PIL.ImageStat
 import PyPDF2
 import re
 import shutil
@@ -30,9 +31,9 @@ def mk_arg_parser():
       description='Auto-feed documents into PDFs with a text layer.',
       epilog='''That means this tool automates the workflow around scanadf
 and tesseract. It's recommended to use Tesseract 4, for better OCR
-performance - even if only the alpha version is available.
+performance - even if only the beta version is available.
 
-2017, Georg Sauthoff <mail@gms.tf>, GPLv3+
+2017-2018, Georg Sauthoff <mail@gms.tf>, GPLv3+
       ''')
   p.add('output', metavar='FILENAME', nargs=1,
       help='output PDF filename')
@@ -61,8 +62,6 @@ performance - even if only the alpha version is available.
       help='Scanner device')
   p.add_argument('--old-tesseract', action='store_true',
       help='Allow Tesseract version < 4')
-  p.add_argument('-j', type=int,
-      help='Number of parallel convert jobs to start (default: cores-1)')
   p.add_argument('--exclude', '-x', default='',
       help='Comma-separated list of pages to ignore')
   p.add_argument('--duplex', action='store_true', default=True,
@@ -101,9 +100,6 @@ def parse_args(*a):
     setup_file_logging(args.log)
   if not args.debug:
     logging.getLogger().handlers[0].setLevel(logging.WARNING)
-  if not args.j:
-    args.j = max(multiprocessing.cpu_count() - 1, 1)
-    log.debug('Starting {} convert jobs at most'.format(args.j))
   if args.exclude:
     args.exclude = set(int(x) for x in args.exclude.split(','))
   else:
@@ -182,26 +178,46 @@ def scanadf(args):
     for line in p.stdout:
       yield line[:-1]
 
+def avg_brightness(filename):
+  img = PIL.Image.open(filename)
+  log.debug('Dimensions (W x H): {}'.format(img.size))
+  img = img.convert('L')
+  # exclude the margins to ignore punch holes etc.
+  img = img.crop((300, 300, img.size[0] - 300, img.size[1] - 300))
+  stat = PIL.ImageStat.Stat(img)
+  # shifting the mean to deal with empty pages where the
+  # reverse page shines through a little
+  m = stat.mean[0] - 50
+  log.debug('Image avg brightness of {}: {}'.format(filename, m))
+  log.debug('Image rms brightness of {}: {}'.format(filename, stat.rms[0]))
+  return img, m
 
-dim_re = re.compile('(PNG|JPEG) ([0-9]+)x([0-9]+) ')
+def binarize(input_img, thresh):
+  # with grayscale, 0 is black and 255 is white (bightest)
+  # to simplify the counting we binarize to: 0=white, 1=black
+  img = input_img.point(lambda v : v < thresh)
+  return img
 
-def start_is_empty_img(filename, i):
-  # doing a noisy trim here - cf.
-  # http://www.imagemagick.org/Usage/crop/#trim_blur
-  # http://www.imagemagick.org/Usage/compare/ (Blank Fax)
-  # '-virtual-pixel', 'edge'
-  p = Popen(['convert', filename, '-shave', '300x0',
-      '-virtual-pixel', 'White', '-blur', '0x15',
-      '-fuzz', '15%', '-trim', 'info:'],
-      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-  return p
+def erode(input_img):
+  img = input_img.filter(PIL.ImageFilter.MinFilter(3))
+  return img
 
-def is_empty_img(stdout):
-  m = dim_re.search(stdout)
-  if not m:
-    raise  RuntimeError("Couldn't find dimensions in: {}".format(stdout))
-  return int(m.group(2)) < 80 or int(m.group(3)) < 80
-  #return 'geometry does not contain image' in r.stderr
+def count_black_px(img):
+  n = img.size[0] * img.size[1]
+  x = sum(img.getdata())
+  log.debug('{} of {} pixels are black ({:.2f} %)'.format(x, n, x/n*100))
+  return x
+
+# cf. https://dsp.stackexchange.com/a/48837/35404
+def is_empty(filename):
+  img, thresh = avg_brightness(filename)
+  img = binarize(img, thresh)
+  img = erode(img)
+  img = erode(img)
+  x = count_black_px(img)
+  return x < 100
+
+
 
 def check_tesseract(args):
   o = subprocess.check_output(['tesseract', '--version'],
@@ -211,41 +227,6 @@ def check_tesseract(args):
   return LooseVersion(version) < LooseVersion('4') \
       and not args.old_tesseract
 
-class PQueue:
-  def __init__(self, j):
-    self._j = j
-    self._running = []
-    self._running_cnt = 0
-    self._queued = []
-    self._done = []
-  def start(self, f, *xs, **ys):
-    self._queued.append((f, xs, ys))
-    self._start_more()
-  def _start_more(self):
-    while self._queued and self._running_cnt < self._j:
-      f, xs, ys = self._queued.pop(0)
-      p = f(*xs, **ys)
-      self._running.append((p, xs, ys))
-      if type(p) is subprocess.Popen:
-        self._running_cnt += 1
-  def yield_done(self, timeout=None):
-    while self._done or self._running or self._queued:
-      self._start_more()
-      for p, xs, ys, o, e in self._done:
-        yield (p, xs, ys, o, e)
-      self._done.clear()
-      if self._running:
-        try:
-          p, xs, ys = self._running[0]
-          if type(p) is subprocess.Popen:
-            o, e = p.communicate(timeout=timeout)
-          else:
-            o, e = p
-          self._done.append((p, xs, ys, o, e))
-          self._running.pop(0)
-          self._running_cnt -= 1
-        except subprocess.TimeoutExpired:
-          yield (None, xs, None, None, None)
 
 # One thing to keep in mind:
 # scanimage supports directly writing jpg and tesseract supports doing
@@ -324,37 +305,26 @@ def imain_rest(args):
       stdin=subprocess.PIPE,
       stdout=subprocess.DEVNULL,
       stderr=subprocess.DEVNULL) if args.ocr else None
-  pool = PQueue(args.j)
   imgs = []
-  def forward_page(p, xs, ys, o, e):
-    if p:
-      if xs[1] in args.exclude:
-        log.debug('Ignoring {}. page because it is excluded'.format(xs[1]))
-      elif is_empty_img(o):
-        log.warn('Ignoring {}. page because it is empty'.format(xs[1]))
-      else:
-        log.debug('Sending {} to tesseract'.format(xs[0]))
-        imgs.append(xs[0])
-        if args.ocr:
-          tesseract.stdin.write(xs[0] + '\n')
-    else:
-      log.debug('Still waiting on is_empty process for {}'.format(xs[0]))
-      return False
-    return True
   for i, filename in enumerate(scanadf(args), 1):
     log.debug('{} successfully scanned'.format(filename))
-    if args.keep_empty or i in args.exclude:
-      pool.start(lambda x,y: ('PNG 2323x2323 ', None), filename, i)
-    else:
-      pool.start(start_is_empty_img, filename, i)
-    for p, xs, ys, o, e in pool.yield_done(timeout=0.1):
-      if not forward_page(p, xs, ys, o, e):
-        break
-  for p, xs, ys, o, e in pool.yield_done():
-    forward_page(p, xs, ys, o, e)
+    if not args.keep_empty:
+      if i in args.exclude:
+        log.debug('Ignoring {}. page because it is excluded'.format(i))
+        continue
+      if is_empty(filename):
+        log.warn('Ignoring {}. page because it is empty'.format(i))
+        continue
+    imgs.append(filename)
+    if args.ocr:
+      log.debug('Sending {} to tesseract'.format(filename))
+      tesseract.stdin.write(filename + '\n')
   if args.ocr:
     log.debug('Closing tesseract stdin')
     tesseract.stdin.close()
+  if not imgs:
+    log.error('No images retrieved.')
+    return 1
   create_img_pdf(imgs, args)
   if args.ocr:
     log.debug('Waiting on tesseract')
