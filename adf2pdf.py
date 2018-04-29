@@ -287,7 +287,9 @@ def create_img_pdf(imgs, args):
     imgs = ts
   with open(filename, 'wb') as f:
     log.debug('Images: {}'.format(imgs))
-    img2pdf.convert(imgs, outputstream=f)
+    a4 = (img2pdf.mm_to_pt(210), img2pdf.mm_to_pt(297))
+    layout_fn = img2pdf.get_layout_fun(a4)
+    img2pdf.convert(imgs, outputstream=f, layout_fun=layout_fn)
 
 # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273629726
 def merge_pdfs(filename1, filename2, ofilename):
