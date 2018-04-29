@@ -73,6 +73,10 @@ performance - even if only the alpha version is available.
       help='Use the JPEG 2000 format instead of just JPEG when scanning in color (cf. --color)')
   p.add_argument('--png', action='store_true',
       help="When using --color, don't compress the images into JPEG before including them in the PDF (not recommended)")
+  p.add_argument('--ocr', action='store_true', default=True,
+      help='Enable OCR (via Tesseract) (default: true)')
+  p.add_argument('--no-ocr', dest='ocr', action='store_false',
+      help='Disable OCR')
   return p
 
 @contextlib.contextmanager
@@ -251,9 +255,13 @@ class PQueue:
 # to save space.
 def png2jpg(filename, ofilename):
   log.debug('Converting {} to {}'.format(filename, ofilename))
+  if ofilename.endswith('.jpg'):
+    opts = { 'optimize': True }
+  else:
+    opts = { 'quality_mode': 'rates', 'quality_layers': [70] }
   with PIL.Image.open(filename) as png:
     img = png.convert('RGB')
-    img.save(ofilename, optimize=True)
+    img.save(ofilename, **opts)
   return ofilename
 
 # img2pdf performs better than ImageMagick and Tesseract, i.e. the
@@ -294,7 +302,7 @@ def merge_pdfs(filename1, filename2, ofilename):
       opdf.write(g)
 
 def imain(args):
-  if check_tesseract(args):
+  if args.ocr and check_tesseract(args):
     log.error('Tesseract is too old. Try putting Tesseract 4 into the PATH.')
     return 1
   with Temporary_Directory(name=args.work,
@@ -310,7 +318,7 @@ def imain_rest(args):
       '-', args.work + '/text-only', 'pdf'],
       stdin=subprocess.PIPE,
       stdout=subprocess.DEVNULL,
-      stderr=subprocess.DEVNULL)
+      stderr=subprocess.DEVNULL) if args.ocr else None
   pool = PQueue(args.j)
   imgs = []
   def forward_page(p, xs, ys, o, e):
@@ -322,7 +330,8 @@ def imain_rest(args):
       else:
         log.debug('Sending {} to tesseract'.format(xs[0]))
         imgs.append(xs[0])
-        tesseract.stdin.write(xs[0] + '\n')
+        if args.ocr:
+          tesseract.stdin.write(xs[0] + '\n')
     else:
       log.debug('Still waiting on is_empty process for {}'.format(xs[0]))
       return False
@@ -338,11 +347,13 @@ def imain_rest(args):
         break
   for p, xs, ys, o, e in pool.yield_done():
     forward_page(p, xs, ys, o, e)
-  log.debug('Closing tesseract stdin')
-  tesseract.stdin.close()
+  if args.ocr:
+    log.debug('Closing tesseract stdin')
+    tesseract.stdin.close()
   create_img_pdf(imgs, args)
-  log.debug('Waiting on tesseract')
-  tesseract.wait()
+  if args.ocr:
+    log.debug('Waiting on tesseract')
+    tesseract.wait()
   # merge images on top of text or the other way around
   # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273389307
   merge_pdfs(args.work + '/text-only.pdf',  args.work + '/image-only.pdf',
