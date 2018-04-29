@@ -156,7 +156,7 @@ def quote_arg(x):
 def Popen(cmd, *xs, **ys):
   call = ' '.join(quote_arg(x) for x in cmd)
   log.debug('Calling: ' + call)
-  return subprocess.Popen(cmd, *xs, universal_newlines=True, **ys)
+  return subprocess.Popen(cmd, *xs, **ys)
 
 def scanadf(args):
   format = 'png'
@@ -177,6 +177,7 @@ def scanadf(args):
       '--format=' + format,
       '--batch={}/{}'.format(args.work, pat),
       '--batch-print'],
+      universal_newlines=True,
       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as p:
     for line in p.stdout:
       yield line[:-1]
@@ -318,6 +319,8 @@ def imain_rest(args):
       '-c', 'stream_filelist=true',
       '-c', 'textonly_pdf=1',
       '-', args.work + '/text-only', 'pdf'],
+      universal_newlines=True,
+      bufsize=1, # enable line buffering, requires universal_newlines=True
       stdin=subprocess.PIPE,
       stdout=subprocess.DEVNULL,
       stderr=subprocess.DEVNULL) if args.ocr else None
