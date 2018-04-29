@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
-# adf2pdf - automate the workflow around scanadf and tesseract.
+# adf2pdf - obtain images from an automatic document feed scanner,
+#           exclude empty pages, apply OCR and create a nice
+#           (i.e. small and high-quality) PDF with a text layer
 #
 # 2017, Georg Sauthoff <mail@gms.tf>, GPLv3+
 
@@ -162,7 +164,7 @@ def scanadf(args):
   if args.no_scan:
     t = '{}/*{}'.format(args.work, pat.replace('%04d', '*'))
     log.debug('globbing for: {}'.format(t))
-    yield from glob.glob(t)
+    yield from sorted(glob.glob(t))
     return
 
   duplex = [ '--source=ADF Duplex' ] if args.duplex else []
@@ -253,7 +255,7 @@ def png2jpg(filename, ofilename):
   log.debug('Converting {} to {}'.format(filename, ofilename))
   with PIL.Image.open(filename) as png:
     img = png.convert('RGB')
-    img.save(ofilename)
+    img.save(ofilename, optimize=True)
   return ofilename
 
 # img2pdf performs better than ImageMagick and Tesseract, i.e. the
