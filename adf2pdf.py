@@ -76,6 +76,8 @@ performance - even if only the beta version is available.
       help='Enable OCR (via Tesseract) (default: true)')
   p.add_argument('--no-ocr', dest='ocr', action='store_false',
       help='Disable OCR')
+  p.add_argument('--text', '--txt', '-t', action='store_true',
+      help='Also generate a .txt file. This usually yields a better structured text file than just creating a PDF and using pdftotext on it')
   return p
 
 @contextlib.contextmanager
@@ -96,6 +98,10 @@ def parse_args(*a):
   arg_parser = mk_arg_parser()
   args = arg_parser.parse_args(*a)
   args.output = args.output[0]
+  if args.output.lower().endswith('.pdf'):
+    args.output_txt = args.output[:-3] + 'txt'
+  else:
+    args.output_txt = args.output + '.txt'
   if args.log:
     setup_file_logging(args.log)
   if not args.debug:
@@ -296,10 +302,13 @@ def imain(args):
 
 
 def imain_rest(args):
+  create_txt = ['-c', 'tessedit_create_txt=1' ] if args.text else []
   tesseract = Popen(['tesseract', '--oem', args.oem, '-l', args.lang,
       '-c', 'stream_filelist=true',
       '-c', 'textonly_pdf=1',
-      '-', args.work + '/text-only', 'pdf'],
+      '-c', 'tessedit_create_pdf=1',
+      ] + create_txt + [
+      '-', args.work + '/text-only' ],
       universal_newlines=True,
       bufsize=1, # enable line buffering, requires universal_newlines=True
       stdin=subprocess.PIPE,
@@ -333,6 +342,9 @@ def imain_rest(args):
   # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273389307
   merge_pdfs(args.work + '/text-only.pdf',  args.work + '/image-only.pdf',
       args.output)
+  if args.text:
+    log.debug('Creating text file: {}'.format(args.output_txt))
+    shutil.copy(args.work + '/text-only.txt', args.output_txt)
   return 0
 
 def main(*a):
