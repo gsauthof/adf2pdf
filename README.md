@@ -1,7 +1,7 @@
-This repository contains **adf2pdf**, a tool that turns a batch
-of paper pages into a PDF with a text layer.  By default, it
-detects empty pages (as they may easily occur during duplex
-scanning) and excludes them from the OCR and the resulting PDF.
+adf2pdf - a tool that turns a batch of paper pages into a PDF
+with a text layer.  By default, it detects empty pages (as they
+may easily occur during duplex scanning) and excludes them from
+the OCR and the resulting PDF.
 
 For that, it uses [Sane's][5] [scanimage][6] for the scanning,
 [Tesseract][4] for the [optical character recognition] (OCR), and
@@ -11,7 +11,7 @@ the Python packages [img2pdf][9], [Pillow (PIL)][10] and
 
 Example:
 
-    $ ./adf2pdf.py contract-xyz.pdf
+    $ adf2pdf.py contract-xyz.pdf
 
 2017, Georg Sauthoff <mail@gms.tf>
 
