@@ -11,7 +11,7 @@ the Python packages [img2pdf][9], [Pillow (PIL)][10] and
 
 Example:
 
-    $ adf2pdf.py contract-xyz.pdf
+    $ adf2pdf contract-xyz.pdf
 
 2017, Georg Sauthoff <mail@gms.tf>
 
@@ -25,6 +25,28 @@ Example:
 - Only use of safe compression methods, i.e. no error-prone
   symbol segmentation style compression like [JBIG2][12] or JB2
   that is used in [Xerox photocopiers][12] and the DjVu format.
+
+## Install Instructions
+
+Adf2pdf can be directly installed with [`pip`][13], e.g.
+
+    $ pip3 install --user adf2pdf
+
+or
+
+    $ pip3 install adf2pdf
+
+See also the [PyPI adf2pdf project page][14].
+
+Alternatively, the Python file `adf2pdf.py` can be directly
+executed in a cloned repository, e.g.:
+
+    $ ./adf2pdf.py report.pdf
+
+In addition to that, one can install the development version from
+a cloned work-tree like this:
+
+    $ pip3 install --user .
 
 ## Hardware Requirements
 
@@ -83,3 +105,5 @@ Python packages:
 [10]: http://python-pillow.github.io/
 [11]: https://github.com/mstamy2/PyPDF2
 [12]: https://en.wikipedia.org/wiki/JBIG2
+[13]: https://en.wikipedia.org/wiki/Pip_(package_manager)
+[14]: https://pypi.org/project/adf2pdf/
