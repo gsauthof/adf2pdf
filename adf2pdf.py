@@ -78,6 +78,8 @@ performance - even if only the beta version is available.
       help='Disable OCR')
   p.add_argument('--text', '--txt', '-t', action='store_true',
       help='Also generate a .txt file. This usually yields a better structured text file than just creating a PDF and using pdftotext on it')
+  p.add_argument('--resolution', type=int, default=600,
+          help='Scan resolution (default: 600 dpi)')
   return p
 
 @contextlib.contextmanager
@@ -173,7 +175,8 @@ def scanadf(args):
 
   duplex = [ '--source=ADF Duplex' ] if args.duplex else []
   with Popen(['scanimage', '-d', args.device,
-      '--page-width=210', '--page-height=297', '--resolution=600'
+      '--page-width=210', '--page-height=297',
+      '--resolution={}'.format(args.resolution)
       ] + duplex + [
       '--mode=' + mode,
       '--format=' + format,
@@ -184,12 +187,13 @@ def scanadf(args):
     for line in p.stdout:
       yield line[:-1]
 
-def avg_brightness(filename):
+def avg_brightness(filename, args):
+  margin = int(args.resolution * 0.7)
   img = PIL.Image.open(filename)
   log.debug('Dimensions (W x H): {}'.format(img.size))
   img = img.convert('L')
   # exclude the margins to ignore punch holes etc.
-  img = img.crop((300, 300, img.size[0] - 300, img.size[1] - 300))
+  img = img.crop((margin, margin, img.size[0] - margin, img.size[1] - margin))
   stat = PIL.ImageStat.Stat(img)
   # shifting the mean to deal with empty pages where the
   # reverse page shines through a little
@@ -205,7 +209,8 @@ def binarize(input_img, thresh):
   return img
 
 def erode(input_img):
-  img = input_img.filter(PIL.ImageFilter.MinFilter(3))
+  # alternative value: 3
+  img = input_img.filter(PIL.ImageFilter.MinFilter(5))
   return img
 
 def count_black_px(img):
@@ -215,10 +220,9 @@ def count_black_px(img):
   return x
 
 # cf. https://dsp.stackexchange.com/a/48837/35404
-def is_empty(filename):
-  img, thresh = avg_brightness(filename)
+def is_empty(filename, args):
+  img, thresh = avg_brightness(filename, args)
   img = binarize(img, thresh)
-  img = erode(img)
   img = erode(img)
   x = count_black_px(img)
   return x < 100
@@ -321,7 +325,7 @@ def imain_rest(args):
       if i in args.exclude:
         log.debug('Ignoring {}. page because it is excluded'.format(i))
         continue
-      if is_empty(filename):
+      if is_empty(filename, args):
         log.warn('Ignoring {}. page because it is empty'.format(i))
         continue
     imgs.append(filename)
