@@ -326,7 +326,7 @@ def imain_rest(args):
         log.debug('Ignoring {}. page because it is excluded'.format(i))
         continue
       if is_empty(filename, args):
-        log.warn('Ignoring {}. page because it is empty'.format(i))
+        log.warning('Ignoring {}. page because it is empty'.format(i))
         continue
     imgs.append(filename)
     if args.ocr:
