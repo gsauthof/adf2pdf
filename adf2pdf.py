@@ -269,7 +269,7 @@ def png2jpg(filename, ofilename):
 # as well - although, for this use-case CCITT seems to be better suited
 # than the PNGs created by scanimage. (cf. pdfimages -list)
 def create_img_pdf(imgs, args):
-  filename = args.work + '/image-only.pdf'
+  filename = args.work + '/image-only.pdf' if args.ocr else args.output
   log.debug('Writing images to pdf: {}'.format(filename))
   if args.color and not args.png:
     jpg = 'jp2' if args.jp2 else 'jpg'
@@ -342,10 +342,10 @@ def imain_rest(args):
   if args.ocr:
     log.debug('Waiting on tesseract')
     tesseract.wait()
-  # merge images on top of text or the other way around
-  # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273389307
-  merge_pdfs(args.work + '/text-only.pdf',  args.work + '/image-only.pdf',
-      args.output)
+    # merge images on top of text or the other way around
+    # cf. https://github.com/tesseract-ocr/tesseract/issues/660#issuecomment-273389307
+    merge_pdfs(args.work + '/text-only.pdf',  args.work + '/image-only.pdf',
+          args.output)
   if args.text:
     log.debug('Creating text file: {}'.format(args.output_txt))
     shutil.copy(args.work + '/text-only.txt', args.output_txt)
