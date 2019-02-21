@@ -14,7 +14,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name='adf2pdf',  # Required
-    version='0.8.0',  # Required
+    version='0.8.1',  # Required
     description='Automate the workflow around ADF scanning, OCR and PDF creation',  # Required
     long_description=long_description,  # Optional
     long_description_content_type='text/markdown',  # Required with markdown
