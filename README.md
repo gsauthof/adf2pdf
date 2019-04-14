@@ -4,7 +4,7 @@ may easily occur during duplex scanning) and excludes them from
 the OCR and the resulting PDF.
 
 For that, it uses [Sane's][5] [scanimage][6] for the scanning,
-[Tesseract][4] for the [optical character recognition] (OCR), and
+[Tesseract][4] for the [optical character recognition][ocr] (OCR), and
 the Python packages [img2pdf][9], [Pillow (PIL)][10] and
 [PyPDF2][11] for some image-processing tasks and PDF mangling.
 
@@ -74,11 +74,13 @@ i.e. a page is stored in 132 KiB, on average.
 The script assumes Tesseract version 4, by default. Version 3 can
 be used as well, but the [new neural network system in Tesseract
 4][8] just performs magnitudes better than the old OCR model.
-As of mid 2018, there is no stable version 4, yet, but since
-the beta version is so much better at OCR I can't recommend it
+Tesseract 4.0.0 was released in late 2018, thus, distributions
+released in that time frame may still just include version 3 in
+their repositories (e.g. Fedora 29 while Fedora 30 features version
+4). Since version 4 is so much better at OCR I can't recommend it
 enough over the stable version 3.
 
-Tesseract 4 notes:
+Tesseract 4 notes (in case you need to build it from the sources):
 
 - [Build instructions][2] - warning: if you miss the
   `autoconf-archive` dependency you'll get weird autoconf error
@@ -88,8 +90,7 @@ Tesseract 4 notes:
 
 Python packages:
 
-- [img2pdf][9] (not packaged for Fedora, yet) - version 0.2.4 works
-  fine
+- [img2pdf][9] (Fedora package: python3-img2pdf)
 - [Pillow (PIL)][10] (Fedora package: python3-pillow-devel)
 - [PyPDF2][11] (Fedora package: python3-PyPDF2)
 
@@ -107,3 +108,4 @@ Python packages:
 [12]: https://en.wikipedia.org/wiki/JBIG2
 [13]: https://en.wikipedia.org/wiki/Pip_(package_manager)
 [14]: https://pypi.org/project/adf2pdf/
+[ocr]: https://en.wikipedia.org/wiki/Optical_character_recognition
