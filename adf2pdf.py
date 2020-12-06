@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 
-__version__ = '0.8.1'
+__version__ = '0.8.2'
 
 def mk_arg_parser():
   p = configargparse.ArgumentParser(
@@ -81,6 +81,7 @@ performance - even if only the beta version is available.
       help='Also generate a .txt file. This usually yields a better structured text file than just creating a PDF and using pdftotext on it')
   p.add_argument('--resolution', type=int, default=600,
           help='Scan resolution (default: 600 dpi)')
+  p.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
   return p
 
 @contextlib.contextmanager
