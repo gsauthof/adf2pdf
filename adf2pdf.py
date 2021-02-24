@@ -40,13 +40,13 @@ performance - even if only the beta version is available.
       help='output PDF filename')
   p.add_argument('--lang', '-l', metavar='ISO3',
       default='deu',
-      help='Language for OCR (default: deu)')
+      help='Language for OCR (default: %(default)s)')
   p.add_argument('--work', metavar='DIRECTORY',
       help='Work directory (default: automatically created under --temp value). The complete work directory is deleted unless --keep-work is specified.')
   p.add_argument('--temp', metavar='DIRECTORY', default='/var/tmp',
-      help='Temporary base directory (default: /var/tmp). Used unless --work is specified.')
+      help='Temporary base directory (default: %(default)s). Used unless --work is specified.')
   p.add_argument('--log', metavar='FILENAME', const='debug.log', nargs='?',
-      help='Also write log messages into a file')
+      help='Also write log messages into a file (default filename: debug.log)')
   p.add_argument('--keep-empty', action='store_true',
       help='Keep empty pages (i.e. disable empty page detection).')
   p.add_argument('--keep-work', action='store_true',
@@ -54,13 +54,13 @@ performance - even if only the beta version is available.
   p.add_argument('--debug', '-v', action='store_true',
       help='Print debug messages to the console')
   p.add_argument('--oem', default='1',
-      help='Tesseract model (0=legacy, 1=neural) (default: 1)')
+      help='Tesseract model (0=legacy, 1=neural) (default: %(default)s)')
   p.add_argument('--no-scan', action='store_true',
       help='Assume that work directory already contains the image files')
   p.add_argument('--color', action='store_true',
       help='Scan with colors')
   p.add_argument('--device', '-d', default='fujitsu:ScanSnap S1500:53095',
-      help='Scanner device')
+      help='Scanner device (default: %(default)s)')
   p.add_argument('--old-tesseract', action='store_true',
       help='Allow Tesseract version < 4')
   p.add_argument('--exclude', '-x', default='',
@@ -80,7 +80,7 @@ performance - even if only the beta version is available.
   p.add_argument('--text', '--txt', '-t', action='store_true',
       help='Also generate a .txt file. This usually yields a better structured text file than just creating a PDF and using pdftotext on it')
   p.add_argument('--resolution', type=int, default=600,
-          help='Scan resolution (default: 600 dpi)')
+          help='Scan resolution (default: %(default)s dpi)')
   p.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
   return p
 
