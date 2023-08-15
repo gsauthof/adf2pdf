@@ -3,7 +3,6 @@
 from setuptools import setup, find_packages
 from codecs import open
 from os import path
-from adf2pdf import __version__
 
 here = path.abspath(path.dirname(__file__))
 
@@ -15,7 +14,10 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name='adf2pdf',  # Required
-    version=__version__,  # Required
+
+    # NB: cf. __version__ in adf2pdf.py
+    version='0.8.3',  # Required
+
     description='Automate the workflow around ADF scanning, OCR and PDF creation',  # Required
     long_description=long_description,  # Optional
     long_description_content_type='text/markdown',  # Required with markdown

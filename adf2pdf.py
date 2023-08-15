@@ -23,7 +23,8 @@ import subprocess
 import sys
 import tempfile
 
-__version__ = '0.8.2'
+# NB: cf. version in setup.py
+__version__ = '0.8.3'
 
 def mk_arg_parser():
   p = configargparse.ArgumentParser(
