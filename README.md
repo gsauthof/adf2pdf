@@ -69,6 +69,27 @@ The resulting PDF contains a text layer from the OCR such that
 one can search and copy'n'paste some text. It is 1.1 MiB big,
 i.e. a page is stored in 132 KiB, on average.
 
+
+## Related Work
+
+In case you have existing PDF files without text layer or a scan
+appliance that spits out PDFs but doesn't support OCR,
+[OCRmyPDF](https://github.com/ocrmypdf/OCRmyPDF)
+may be a good fit.
+It takes a PDF file, applies OCR to each page and adds the
+result as text layer to the input PDF file.
+It's written in Python and also uses Tesseract for the OCR.
+
+For users that prefer a GUI,
+[Skanpage](https://invent.kde.org/utilities/skanpage) may fit the bill.
+As the name suggests, it's a KDE application that provides a
+clean and modern graphical interface to scanning.
+Unlike a few other GUI alternatives, it _does_ also integrate OCR
+via Tesseract.
+For example, 'Gnome Document Scanner' (a.k.a. simple-scan) and
+Skanlite (also KDE) do **not** support OCR, as of 2025.
+
+
 ## Software Requirements
 
 The script assumes Tesseract version 4, by default. Version 3 can
